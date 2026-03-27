@@ -2,6 +2,7 @@ import dispatcher from '../helpers/dispatcher.js';
 import lazyRequest from '../helpers/lazyRequest.js';
 import session from '../helpers/session.js';
 import globalUtils from '../helpers/utils/globalutils.js';
+import { logText } from '../helpers/utils/logger.ts';
 
 const OPCODES = {
   HEARTBEAT: 1,
@@ -319,7 +320,33 @@ async function handleResume(socket, packet) {
 
   socket.user = user2;
 
-  const session2 = global.sessions.get(session_id);
+  let session2 = global.sessions.get(session_id);
+
+  // Sharding: if session not found locally, check Redis for cross-shard sessions
+  if (!session2 && global.shardingEnabled) {
+    const { getSessionShard } = global.shardManager;
+    const remoteShard = await getSessionShard(session_id);
+
+    if (remoteShard !== null && remoteShard !== global.shardId) {
+      // Session lives on another shard — force full re-identify
+      logText(`[Shard] Session ${session_id} is on shard ${remoteShard}, forcing re-identify`, 'SHARD');
+      const tmpSesh = new session(
+        globalUtils.generateString(16),
+        socket,
+        socket.user,
+        packet.d.token,
+        false,
+        { game_id: null, status: socket.user?.settings?.status ?? 'online', activities: [], user: globalUtils.miniUserObject(socket.user), roles: [] },
+        undefined, undefined, undefined,
+        socket.apiVersion,
+        packet.d.capabilities ?? socket.client_build_date,
+      );
+      tmpSesh.start();
+      socket.session = tmpSesh;
+      tmpSesh.send({ op: OPCODES.INVALID_SESSION, d: false });
+      return;
+    }
+  }
 
   if (!session2) {
     const sesh = new session(

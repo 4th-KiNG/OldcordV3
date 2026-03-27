@@ -81,9 +81,52 @@ app.get('/games', (req, res) => {
 });
 
 app.get('/gateway', (req, res) => {
+  if (global.shardingEnabled) {
+    // In shard mode: return the shard URL for this user's token (if provided)
+    const shardingCfg = global.config?.sharding;
+    const shardUrls = shardingCfg?.shard_urls ?? {};
+
+    return res.status(200).json({
+      url: generateGatewayURL(req),
+      sharding: {
+        enabled: true,
+        num_shards: global.numShards ?? 1,
+        shard_urls: shardUrls,
+        lb_url: shardingCfg?.lb_url ?? null,
+      },
+    });
+  }
+
   return res.status(200).json({
     url: generateGatewayURL(req),
   });
+});
+
+app.get('/gateway/status', async (req, res) => {
+  if (!global.shardingEnabled) {
+    return res.status(200).json({
+      sharding: false,
+      shard_id: 0,
+      num_shards: 1,
+      local_sessions: global.sessions?.size ?? 0,
+      healthy: true,
+    });
+  }
+
+  try {
+    const { getShardStatuses } = global.shardManager;
+    const shards = await getShardStatuses(global.numShards ?? 1);
+
+    return res.status(200).json({
+      sharding: true,
+      shard_id: global.shardId ?? 0,
+      num_shards: global.numShards ?? 1,
+      local_sessions: global.sessions?.size ?? 0,
+      shards,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: String(err) });
+  }
 });
 
 app.get('/gateway/bot', (req, res) => {

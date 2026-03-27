@@ -38,6 +38,9 @@ import path from 'path';
 
 import router from './api/index.js';
 import gateway from './gateway.ts';
+import * as ShardManager from './sharding/ShardManager.ts';
+import * as InterShard from './sharding/InterShard.ts';
+import { initRedis } from './sharding/redis.ts';
 import errors from './helpers/consts/errors.js';
 import database from './helpers/database.js';
 import {
@@ -94,6 +97,36 @@ global.database = database;
 global.permissions = permissions;
 global.config = globalUtils.config;
 global.rooms = [];
+
+// Sharding setup
+const shardingConfig = (globalUtils.config as unknown as { sharding?: { enabled?: boolean; num_shards?: number; shard_id?: number; redis_url?: string } }).sharding;
+const shardingEnabled = shardingConfig?.enabled === true;
+const envShardId = process.env.SHARD_ID !== undefined ? Number(process.env.SHARD_ID) : undefined;
+const shardId = envShardId ?? shardingConfig?.shard_id ?? 0;
+const numShards = shardingConfig?.num_shards ?? 1;
+
+global.shardingEnabled = shardingEnabled;
+global.shardId = shardId;
+global.numShards = numShards;
+global.shardManager = ShardManager;
+global.interShard = InterShard;
+
+if (shardingEnabled) {
+  const redisUrl = shardingConfig?.redis_url ?? 'redis://127.0.0.1:6379';
+  initRedis(redisUrl);
+  await InterShard.startInterShardListener(shardId);
+  logText(`Sharding enabled: shard ${shardId}/${numShards}, redis: ${redisUrl}`, 'OLDCORD');
+
+  // Periodic shard heartbeat
+  setInterval(async () => {
+    try {
+      await ShardManager.heartbeatShard(shardId, global.sessions.size);
+    } catch {
+      // non-fatal
+    }
+  }, 10 * 1000);
+}
+
 global.MEDIA_CODECS = [
   {
     kind: 'audio',

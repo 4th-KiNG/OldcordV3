@@ -1,11 +1,45 @@
 import { handleMembersSync } from './lazyRequest.js';
 import { logText } from './utils/logger.ts';
 
+// Sharding: forward event to a user on another shard via Redis Pub/Sub
+async function shardForward(userId, type, payload) {
+  if (!global.shardingEnabled) return;
+  try {
+    const { publishToUserShard } = global.interShard;
+    await publishToUserShard(userId, global.numShards, {
+      kind: 'DISPATCH_USER',
+      userId,
+      eventType: type,
+      payload,
+    });
+  } catch (err) {
+    logText(`[Shard] shardForward error: ${err}`, 'error');
+  }
+}
+
+// Sharding: forward guild event to all shards (each shard dispatches only to its local sessions)
+async function shardForwardGuild(guildId, type, payload) {
+  if (!global.shardingEnabled) return;
+  try {
+    const { publishToShard } = global.interShard;
+    for (let i = 0; i < global.numShards; i++) {
+      if (i === global.shardId) continue; // we handle local sessions ourselves
+      await publishToShard(i, { kind: 'DISPATCH_GUILD', guildId, eventType: type, payload });
+    }
+  } catch (err) {
+    logText(`[Shard] shardForwardGuild error: ${err}`, 'error');
+  }
+}
+
 const dispatcher = {
   dispatchEventTo: async (user_id, type, payload) => {
     const sessions = global.userSessions.get(user_id);
 
-    if (!sessions || sessions.size === 0) return false;
+    if (!sessions || sessions.length === 0) {
+      // Sharding: user may be on another shard
+      await shardForward(user_id, type, payload);
+      return false;
+    }
 
     for (let z = 0; z < sessions.length; z++) {
       sessions[z].dispatch(type, payload);
@@ -218,6 +252,9 @@ const dispatcher = {
     if (!guild || !guild.members) {
       return;
     }
+
+    // Sharding: broadcast to other shards first (they will dispatch to their local sessions)
+    await shardForwardGuild(guild.id, type, payload);
 
     for (let i = 0; i < guild.members.length; i++) {
       const member = guild.members[i];

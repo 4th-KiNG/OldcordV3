@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node tests/sharding.test.mjs)",
+      "Bash(node --test tests/sharding.test.mjs)"
+    ]
+  }
+}

@@ -99,6 +99,12 @@ class session {
       this.presence.status = status.toLowerCase();
       this.presence.game_id = game_id;
 
+      // Sharding: keep Redis presence in sync
+      if (global.shardingEnabled) {
+        const { updatePresenceInRedis } = global.shardManager;
+        updatePresenceInRedis(this.user.id, status.toLowerCase()).catch(() => {});
+      }
+
       const broadcastStatus =
         status.toLowerCase() === 'invisible' ? 'offline' : status.toLowerCase(); //this works i think
 
@@ -281,6 +287,14 @@ class session {
 
     global.sessions.delete(this.id);
 
+    // Sharding: remove session metadata from Redis
+    if (global.shardingEnabled) {
+      const { unregisterSession } = global.shardManager;
+      unregisterSession(this.id, this.user.id, global.shardId).catch((err) =>
+        logText(`[Shard] unregisterSession error: ${err}`, 'error'),
+      );
+    }
+
     if (this.type === 'gateway') {
       if (!uSessions || uSessions.length === 0) {
         await this.updatePresence('offline', null);
@@ -333,6 +347,17 @@ class session {
 
       uSessions.push(this);
       global.userSessions.set(this.user.id, uSessions);
+
+      // Sharding: register session metadata in Redis
+      if (global.shardingEnabled) {
+        const { registerSession } = global.shardManager;
+        registerSession(
+          this.id,
+          this.user.id,
+          global.shardId,
+          this.presence?.status ?? 'online',
+        ).catch((err) => logText(`[Shard] registerSession error: ${err}`, 'error'));
+      }
     }
   }
   async readyUp(body) {

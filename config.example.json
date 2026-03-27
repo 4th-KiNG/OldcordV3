@@ -317,5 +317,17 @@
       "breakdown": "1000 * 60 * 60"
     }
   },
-  "serveDesktopClient": false
+  "serveDesktopClient": false,
+  "sharding": {
+    "enabled": false,
+    "num_shards": 2,
+    "shard_id": 0,
+    "redis_url": "redis://127.0.0.1:6379",
+    "lb_port": 8080,
+    "lb_url": "ws://127.0.0.1:8080",
+    "shard_urls": {
+      "0": "ws://127.0.0.1:9000",
+      "1": "ws://127.0.0.1:9001"
+    }
+  }
 }
